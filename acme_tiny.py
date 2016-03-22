@@ -12,21 +12,21 @@ LOGGER = logging.getLogger(__name__)
 LOGGER.addHandler(logging.StreamHandler())
 LOGGER.setLevel(logging.INFO)
 
-def filebased_keyauth_challenge(domain, token, keyauthorization, acme_dir=None):
+def filebased_keyauth_challenge(domain, token, keyauthorization, acme_dir=None, guid=None):
     # writes the challenge to disk
     wellknown_path = os.path.join(acme_dir, token)
     with open(wellknown_path, "w") as wellknown_file:
         wellknown_file.write(keyauthorization)
     return wellknown_path
 
-def filebased_keyauth_cleanup(domain, token, keyauthorization, acme_dir=None):
+def filebased_keyauth_cleanup(domain, token, keyauthorization, acme_dir=None, guid=None):
     # removes the challenge from disk
     wellknown_path = os.path.join(acme_dir, token)
     os.remove(wellknown_path)
 
 def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA,
             handle_keyauth_challenge=filebased_keyauth_challenge,
-            handle_keyauth_cleanup=filebased_keyauth_cleanup,
+            handle_keyauth_cleanup=filebased_keyauth_cleanup, guid=None,
 ):
     # helper function base64 encode for jose spec
     def _b64(b):
@@ -122,7 +122,7 @@ def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA,
         challenge = [c for c in json.loads(result.decode('utf8'))['challenges'] if c['type'] == "http-01"][0]
         token = re.sub(r"[^A-Za-z0-9_\-]", "_", challenge['token'])
         keyauthorization = "{0}.{1}".format(token, thumbprint)
-        wellknown_path = handle_keyauth_challenge(domain, token, keyauthorization, acme_dir=acme_dir)
+        wellknown_path = handle_keyauth_challenge(domain, token, keyauthorization, acme_dir=acme_dir, guid=guid)
 
         # check that the file is in place
         wellknown_url = "http://{0}/.well-known/acme-challenge/{1}".format(domain, token)
@@ -131,7 +131,7 @@ def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA,
             resp_data = resp.read().decode('utf8').strip()
             assert resp_data == keyauthorization
         except (IOError, AssertionError):
-            handle_keyauth_cleanup(domain, token, keyauthorization, acme_dir=acme_dir)
+            handle_keyauth_cleanup(domain, token, keyauthorization, acme_dir=acme_dir, guid=guid)
             raise ValueError("Wrote file to {0}, but couldn't download {1}".format(
                 wellknown_path, wellknown_url))
 
