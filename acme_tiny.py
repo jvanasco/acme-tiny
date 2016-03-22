@@ -12,7 +12,22 @@ LOGGER = logging.getLogger(__name__)
 LOGGER.addHandler(logging.StreamHandler())
 LOGGER.setLevel(logging.INFO)
 
-def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA):
+def filebased_keyauth_challenge(domain, token, keyauthorization, acme_dir=None):
+    # writes the challenge to disk
+    wellknown_path = os.path.join(acme_dir, token)
+    with open(wellknown_path, "w") as wellknown_file:
+        wellknown_file.write(keyauthorization)
+    return wellknown_path
+
+def filebased_keyauth_cleanup(domain, token, keyauthorization, acme_dir=None):
+    # removes the challenge from disk
+    wellknown_path = os.path.join(acme_dir, token)
+    os.remove(wellknown_path)
+
+def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA,
+            handle_keyauth_challenge=filebased_keyauth_challenge,
+            handle_keyauth_cleanup=filebased_keyauth_cleanup,
+):
     # helper function base64 encode for jose spec
     def _b64(b):
         return base64.urlsafe_b64encode(b).decode('utf8').replace("=", "")
@@ -107,9 +122,7 @@ def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA):
         challenge = [c for c in json.loads(result.decode('utf8'))['challenges'] if c['type'] == "http-01"][0]
         token = re.sub(r"[^A-Za-z0-9_\-]", "_", challenge['token'])
         keyauthorization = "{0}.{1}".format(token, thumbprint)
-        wellknown_path = os.path.join(acme_dir, token)
-        with open(wellknown_path, "w") as wellknown_file:
-            wellknown_file.write(keyauthorization)
+        wellknown_path = handle_keyauth_challenge(domain, token, keyauthorization, acme_dir=acme_dir)
 
         # check that the file is in place
         wellknown_url = "http://{0}/.well-known/acme-challenge/{1}".format(domain, token)
@@ -118,7 +131,7 @@ def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA):
             resp_data = resp.read().decode('utf8').strip()
             assert resp_data == keyauthorization
         except (IOError, AssertionError):
-            os.remove(wellknown_path)
+            handle_keyauth_cleanup(domain, token, keyauthorization, acme_dir=acme_dir)
             raise ValueError("Wrote file to {0}, but couldn't download {1}".format(
                 wellknown_path, wellknown_url))
 
@@ -142,7 +155,7 @@ def get_crt(account_key, csr, acme_dir, log=LOGGER, CA=DEFAULT_CA):
                 time.sleep(2)
             elif challenge_status['status'] == "valid":
                 log.info("{0} verified!".format(domain))
-                os.remove(wellknown_path)
+                handle_keyauth_cleanup(domain, token, keyauthorization, acme_dir=acme_dir)
                 break
             else:
                 raise ValueError("{0} challenge did not pass: {1}".format(
